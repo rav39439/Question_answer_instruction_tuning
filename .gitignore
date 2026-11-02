@@ -1,0 +1,61 @@
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+myenv/
+.env/
+.venv/
+
+# IDE and editor files
+.vscode/
+.idea/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Training checkpoints and temporary model files
+*.ckpt
+*.checkpoint
+*.tfrecord
+*.tfrecord-*
+tokenized_shards/
+training_logs/
+
+# Temporary datasets
+*.csv
+*.xlsx
+*.parquet
+
+# Keep the trained inference model
+# Keep the tokenizer required for inference
+# models/ is intentionally NOT ignored
+models/
