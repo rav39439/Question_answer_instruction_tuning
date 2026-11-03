@@ -16,7 +16,9 @@ from transformers import BertTokenizerFast
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from huggingface_hub import hf_hub_download
 
+MODEL_DIR = "/var/data/models"
 
 BASE_DIR = Path(__file__).resolve().parent
 ONNX_PATH = BASE_DIR / "final_instruction_tuned.onnx"
@@ -74,20 +76,35 @@ def load_tokenizer(tokenizer_path=None):
     return tokenizer
 
 
-def load_onnx_model(onnx_path=ONNX_PATH):
-    """Load the trained ONNX model."""
+# def load_onnx_model(onnx_path=ONNX_PATH):
+#     """Load the trained ONNX model."""
 
-    onnx_path = Path(onnx_path)
+#     onnx_path = Path(onnx_path)
 
-    if not onnx_path.is_file():
-        raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
+#     if not onnx_path.is_file():
+#         raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
 
-    session = ort.InferenceSession(
-        str(onnx_path),
-        providers=["CPUExecutionProvider"]
+#     session = ort.InferenceSession(
+#         str(onnx_path),
+#         providers=["CPUExecutionProvider"]
+#     )
+
+#     return session
+
+def load_onnx_model():
+
+    model_path = hf_hub_download(
+        repo_id="rav39439/summerization-model",
+        filename="final_instruction_tuned.onnx",
+        repo_type="model",
+        token=os.getenv("HF_TOKEN"),
+        local_dir=MODEL_DIR
     )
 
-    return session
+    return ort.InferenceSession(
+        model_path,
+        providers=["CPUExecutionProvider"]
+    )
 
 
 def positional_encoding_np(position, d_model):
