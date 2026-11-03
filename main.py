@@ -18,7 +18,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from huggingface_hub import hf_hub_download
 
-MODEL_DIR = "/var/data/models"
+MODEL_DIR = Path("/tmp/models")
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 BASE_DIR = Path(__file__).resolve().parent
 ONNX_PATH = BASE_DIR / "final_instruction_tuned.onnx"
