@@ -15,7 +15,7 @@ from transformers import BertTokenizerFast
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from huggingface_hub import hf_hub_download
 
 MODEL_DIR = Path("/tmp/models")
@@ -37,6 +37,7 @@ model = None
 class QuestionRequest(BaseModel):
     question: str
     max_gen: int = 250
+    temperature: float = Field(default=1.0, gt=0.0, allow_inf_nan=False)
 
 
 def load_tokenizer(tokenizer_path=None):
@@ -120,7 +121,26 @@ def positional_encoding_np(position, d_model):
     return angle_rads[np.newaxis, ...].astype(np.float32)
 
 
-def generate_answer(model, tokenizer, question, seq_len=256, max_gen=150):
+def sample_next_token(logits, temperature):
+    if not np.isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be a finite number greater than 0.")
+
+    scaled_logits = np.asarray(logits, dtype=np.float64) / temperature
+    scaled_logits -= np.max(scaled_logits)
+    probabilities = np.exp(scaled_logits)
+    probabilities /= probabilities.sum()
+
+    return int(np.random.choice(len(probabilities), p=probabilities))
+
+
+def generate_answer(
+    model,
+    tokenizer,
+    question,
+    seq_len=256,
+    max_gen=150,
+    temperature=1.0,
+):
 
     if seq_len < 2:
         raise ValueError("seq_len must be at least 2.")
@@ -192,9 +212,7 @@ def generate_answer(model, tokenizer, question, seq_len=256, max_gen=150):
 
         logits = model.run(None, feed)[0]
 
-        next_id_value = int(
-            np.argmax(logits[0, -1, :])
-        )
+        next_id_value = sample_next_token(logits[0, -1, :], temperature)
 
         generated_ids.append(next_id_value)
 
@@ -226,7 +244,8 @@ def generate_answer_stream(
     tokenizer,
     question,
     seq_len=256,
-    max_gen=150
+    max_gen=150,
+    temperature=1.0,
 ):
     """Generate and yield decoded text as tokens are produced."""
 
@@ -290,9 +309,7 @@ def generate_answer_stream(
 
         logits = model.run(None, feed)[0]
 
-        next_id_value = int(
-            np.argmax(logits[0, -1, :])
-        )
+        next_id_value = sample_next_token(logits[0, -1, :], temperature)
 
         # Stop at SEP or EOS.
         if next_id_value in [
@@ -358,7 +375,8 @@ def generate(request: QuestionRequest):
         model=model,
         tokenizer=tokenizer,
         question=request.question,
-        max_gen=request.max_gen
+        max_gen=request.max_gen,
+        temperature=request.temperature,
     )
 
     return {
@@ -379,7 +397,8 @@ def generate_stream(request: QuestionRequest):
                 model=model,
                 tokenizer=tokenizer,
                 question=request.question,
-                max_gen=request.max_gen
+                max_gen=request.max_gen,
+                temperature=request.temperature,
             ):
 
                 # Send only the newly generated portion.
