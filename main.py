@@ -14,7 +14,7 @@ import onnxruntime as ort
 from transformers import BertTokenizerFast
 
 from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from huggingface_hub import hf_hub_download
 
@@ -333,6 +333,11 @@ def generate_answer_stream(
 # =========================================================
 # FASTAPI ROUTES
 # =========================================================
+
+@app.get("/", include_in_schema=False)
+def stream_page():
+    return FileResponse(BASE_DIR / "templates" / "index.html")
+
 
 @app.on_event("startup")
 def startup_event():

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Streaming answer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, sans-serif;
+      background: #f3f5f8;
+      color: #202938;
+    }
+
+    body {
+      max-width: 760px;
+      margin: 48px auto;
+      padding: 0 20px;
+    }
+
+    main {
+      padding: 28px;
+      border: 1px solid #dce2ea;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 8px 24px #17203312;
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      margin: 18px 0 8px;
+      font-weight: 600;
+    }
+
+    textarea,
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #c8d0dc;
+      border-radius: 6px;
+      font: inherit;
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    button {
+      padding: 10px 16px;
+      border: 0;
+      border-radius: 6px;
+      background: #2457c5;
+      color: white;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.6;
+    }
+
+    #stop {
+      background: #5d6878;
+    }
+
+    #status {
+      min-height: 1.5em;
+      margin: 22px 0 8px;
+      color: #586579;
+    }
+
+    #answer {
+      min-height: 100px;
+      margin: 0;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f6f8fb;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Generate an answer</h1>
+    <form id="question-form">
+      <label for="question">Question</label>
+      <textarea id="question" name="question" required
+        placeholder="Enter your question"></textarea>
+
+      <label for="max-gen">Maximum generated tokens</label>
+      <input id="max-gen" name="max_gen" type="number" min="1" value="150">
+
+      <div class="actions">
+        <button id="submit" type="submit">Generate</button>
+        <button id="stop" type="button" disabled>Stop</button>
+      </div>
+    </form>
+
+    <p id="status" role="status" aria-live="polite">Ready.</p>
+    <section aria-label="Generated answer">
+      <h2>Answer</h2>
+      <pre id="answer"></pre>
+    </section>
+  </main>
+
+  <script>
+    const form = document.querySelector("#question-form");
+    const questionInput = document.querySelector("#question");
+    const maxGenInput = document.querySelector("#max-gen");
+    const submitButton = document.querySelector("#submit");
+    const stopButton = document.querySelector("#stop");
+    const status = document.querySelector("#status");
+    const answer = document.querySelector("#answer");
+    let activeController;
+
+    const pause = (milliseconds) =>
+      new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+    async function handleEvent(data, state) {
+      if (data === "[DONE]") {
+        if (state.pendingWord) {
+          answer.textContent += state.pendingWord;
+          state.pendingWord = "";
+        }
+        state.done = true;
+        status.textContent = "Generation completed.";
+        return;
+      }
+
+      const event = JSON.parse(data);
+      if (event.error) {
+        throw new Error(event.error);
+      }
+
+      if (typeof event.token !== "string") {
+        return;
+      }
+
+      state.pendingWord += event.token;
+      let word = state.pendingWord.match(/^\s*\S+\s+/);
+      while (word) {
+        answer.textContent += word[0];
+        state.pendingWord = state.pendingWord.slice(word[0].length);
+        await pause(45);
+        word = state.pendingWord.match(/^\s*\S+\s+/);
+      }
+    }
+
+    async function readStream(response) {
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status}): ${await response.text()}`);
+      }
+      if (!response.body) {
+        throw new Error("This browser does not support streaming responses.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const state = { buffer: "", pendingWord: "", done: false };
+
+      async function processEvents(final = false) {
+        const events = state.buffer.split(/\r?\n\r?\n/);
+        state.buffer = final ? "" : events.pop();
+        for (const eventText of events) {
+          const data = eventText
+            .split(/\r?\n/)
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).replace(/^ /, ""))
+            .join("\n");
+          if (data) {
+            await handleEvent(data, state);
+          }
+        }
+        if (final && state.buffer) {
+          await handleEvent(state.buffer.replace(/^data:\s?/, ""), state);
+        }
+      }
+
+      while (!state.done) {
+        const { value, done } = await reader.read();
+        if (done) {
+          state.buffer += decoder.decode();
+          await processEvents(true);
+          break;
+        }
+        state.buffer += decoder.decode(value, { stream: true });
+        await processEvents();
+      }
+
+      if (!state.done) {
+        throw new Error("The stream ended before generation completed.");
+      }
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      activeController?.abort();
+      activeController = new AbortController();
+      answer.textContent = "";
+      status.textContent = "Generating...";
+      submitButton.disabled = true;
+      stopButton.disabled = false;
+
+      try {
+        const response = await fetch("/generate/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question: questionInput.value,
+            max_gen: Number(maxGenInput.value)
+          }),
+          signal: activeController.signal
+        });
+        await readStream(response);
+      } catch (error) {
+        if (error.name === "AbortError") {
+          status.textContent = "Generation stopped.";
+        } else {
+          status.textContent = `Error: ${error.message}`;
+        }
+      } finally {
+        submitButton.disabled = false;
+        stopButton.disabled = true;
+        activeController = undefined;
+      }
+    });
+
+    stopButton.addEventListener("click", () => activeController?.abort());
+  </script>
+</body>
+</html>
